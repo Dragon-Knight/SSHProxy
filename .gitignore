@@ -1,0 +1,16 @@
+*.o
+*.a
+*.so
+*.bin
+*.txt
+*.csv
+*.log
+*.tgz
+*.deb
+*.h.gch
+*.json
+*.ini
+*~
+*.depend
+*.layout 
+*.exe
