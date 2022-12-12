@@ -135,6 +135,14 @@ bool SSH_Connect(db_t &db, const char *hostname, uint16_t port, const char *user
         }
 
 
+
+
+	return true;
+}
+
+bool SSH_Send(db_t &db, const char *commandline, string &response)
+{
+
     /* Exec non-blocking on the remove host */
     while((db.channel = libssh2_channel_open_session(db.session)) == NULL && libssh2_session_last_error(db.session, NULL, NULL, 0) == LIBSSH2_ERROR_EAGAIN)
     {
@@ -147,16 +155,11 @@ bool SSH_Connect(db_t &db, const char *hostname, uint16_t port, const char *user
 		SSH_Disconect(db);
     }
 
-	return true;
-}
-
-bool SSH_Send(db_t &db, const char *commandline, string &response)
-{
-
-	while((db.rc = libssh2_channel_exec(db.channel, commandline)) ==
-           LIBSSH2_ERROR_EAGAIN) {
+	while((db.rc = libssh2_channel_exec(db.channel, commandline)) == LIBSSH2_ERROR_EAGAIN)
+	{
         waitsocket(db.sock, db.session);
     }
+
     if(db.rc != 0) {
         fprintf(stderr, "Error\n");
         //exit(1);
@@ -197,6 +200,11 @@ bool SSH_Send(db_t &db, const char *commandline, string &response)
             break;
     }
 
+	while((db.rc = libssh2_channel_close(db.channel)) == LIBSSH2_ERROR_EAGAIN)
+	{
+		waitsocket(db.sock, db.session);
+	}
+
 	return true;
 }
 
@@ -207,8 +215,7 @@ bool SSH_Disconect(db_t &db)
     //char *exitsignal = (char *)"none";
 
 	   //exitcode = 127;
-    while((db.rc = libssh2_channel_close(db.channel)) == LIBSSH2_ERROR_EAGAIN)
-        waitsocket(db.sock, db.session);
+
 
     if(db.rc == 0) {
         //exitcode = libssh2_channel_get_exit_status(db.channel);
