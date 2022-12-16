@@ -21,6 +21,8 @@
 
 #include "utils.h"
 #include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
 
 
 
@@ -48,7 +50,7 @@ struct db_t
 	int sock;
 	struct sockaddr_in sin;
 	LIBSSH2_SESSION *session;
-	LIBSSH2_CHANNEL *channel;
+	//LIBSSH2_CHANNEL *channel;
 	int rc;
 };
 
@@ -143,19 +145,21 @@ bool SSH_Connect(db_t &db, const char *hostname, uint16_t port, const char *user
 bool SSH_Send(db_t &db, const char *commandline, string &response)
 {
 
+	LIBSSH2_CHANNEL *channel;
+
     /* Exec non-blocking on the remove host */
-    while((db.channel = libssh2_channel_open_session(db.session)) == NULL && libssh2_session_last_error(db.session, NULL, NULL, 0) == LIBSSH2_ERROR_EAGAIN)
+    while((channel = libssh2_channel_open_session(db.session)) == NULL && libssh2_session_last_error(db.session, NULL, NULL, 0) == LIBSSH2_ERROR_EAGAIN)
     {
         waitsocket(db.sock, db.session);
     }
     
-    if(db.channel == NULL) {
+    if(channel == NULL) {
         fprintf(stderr, "Error\n");
         //exit(1);
 		SSH_Disconect(db);
     }
 
-	while((db.rc = libssh2_channel_exec(db.channel, commandline)) == LIBSSH2_ERROR_EAGAIN)
+	while((db.rc = libssh2_channel_exec(channel, commandline)) == LIBSSH2_ERROR_EAGAIN)
 	{
         waitsocket(db.sock, db.session);
     }
@@ -170,7 +174,7 @@ bool SSH_Send(db_t &db, const char *commandline, string &response)
         int rc;
         do {
             char buffer[0x4000];
-            rc = libssh2_channel_read(db.channel, buffer, sizeof(buffer) );
+            rc = libssh2_channel_read(channel, buffer, sizeof(buffer) );
             if(rc > 0) {
 
 				response.append(buffer, rc);
@@ -200,10 +204,12 @@ bool SSH_Send(db_t &db, const char *commandline, string &response)
             break;
     }
 
-	while((db.rc = libssh2_channel_close(db.channel)) == LIBSSH2_ERROR_EAGAIN)
+	while((db.rc = libssh2_channel_close(channel)) == LIBSSH2_ERROR_EAGAIN)
 	{
 		waitsocket(db.sock, db.session);
 	}
+
+	libssh2_channel_free(channel);
 
 	return true;
 }
@@ -222,8 +228,8 @@ bool SSH_Disconect(db_t &db)
         //libssh2_channel_get_exit_signal(db.channel, &exitsignal, NULL, NULL, NULL, NULL, NULL);
     }
 
-    libssh2_channel_free(db.channel);
-    db.channel = NULL;
+    
+    //db.channel = NULL;
 
 //shutdown:
 
@@ -320,26 +326,39 @@ struct query_t
 	string login;	// Логин пользователя.
 	string pass;	// Пароль пользователя.
 	string cmd;		// Выполняемая команда.
-	string format;	// Формат ответа, пока только 'raw-string'.
 	bool close;		// Флаг, указывающий на то, что нужно закрыть соединение после выполннения команды, иначе - сохранить.
 	
 	uint32_t hash;	// Уникальный хеш соединения (host+port+login+pass).
 };
+
+string _JSON_Get(Document &obj, const char *key, const char *defval)
+{
+    return (obj.HasMember(key) && obj[key].IsString()) ? obj[key].GetString() : defval;
+}
+
+uint16_t _JSON_Get(Document &obj, const char *key, uint16_t defval)
+{
+    return (obj.HasMember(key) && obj[key].IsUint()) ? obj[key].GetUint() : defval;
+}
+
+bool _JSON_Get(Document &obj, const char *key, bool defval)
+{
+    return (obj.HasMember(key) && obj[key].IsBool()) ? obj[key].GetBool() : defval;
+}
 
 void JSON_Parse(string json_str, query_t &obj)
 {
 	Document json;
 	json.Parse( json_str.c_str() );
 	
-	obj.type = json["type"].GetString();
-	obj.host = json["host"].GetString();
-	obj.port = json["port"].GetUint();
-	obj.login = json["login"].GetString();
-	obj.pass = json["pass"].GetString();
-	obj.cmd = json["cmd"].GetString();
-	obj.format = json["format"].GetString();
-	obj.close = json["close"].GetBool();
-	
+	obj.type = _JSON_Get(json, "type", "ssh");
+	obj.host = _JSON_Get(json, "host", "127.0.0.1");
+	obj.port = _JSON_Get(json, "port", (uint16_t)22); //json["port"].GetUint();
+	obj.login = _JSON_Get(json, "login", "admin");
+	obj.pass = _JSON_Get(json, "pass", "password");
+	obj.cmd = _JSON_Get(json, "cmd", "");
+	obj.close = _JSON_Get(json, "close", false); //json["close"].GetBool();
+
 	string hash_str = obj.host + to_string(obj.port) + obj.login + obj.pass;
 	obj.hash = JSHash(hash_str);
 	
@@ -416,9 +435,32 @@ int main() {
 			//string response(22, '*');
 			string ssh_response;
 			SSH_Send(db_el, obj.cmd.c_str(), ssh_response);
+
+
+
+
+
+
+			StringBuffer s;
+			Writer<StringBuffer> writer(s);
+			
+			writer.StartObject();
+				writer.Key("state");	writer.Bool(true);
+				writer.Key("resp");		writer.String(ssh_response.c_str(), static_cast<SizeType>(ssh_response.length()));
+			writer.EndObject();
 			
 			
-			response->write(SimpleWeb::StatusCode::success_ok, ssh_response);
+			response->write(SimpleWeb::StatusCode::success_ok, s.GetString());
+
+
+
+
+
+
+
+			
+			
+			//response->write(SimpleWeb::StatusCode::success_ok, ssh_response);
 
 
 
